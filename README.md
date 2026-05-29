@@ -1,0 +1,91 @@
+# agy.nvim
+
+Embedded [Antigravity CLI](https://antigravity.google) (`agy`) inside Neovim — a
+floating-terminal integration in the spirit of the Claude Code editor plugin.
+
+Run the `agy` agent in a toggleable floating window, keep the session alive
+across toggles, send the current file or visual selection as context, and have
+buffers auto-reload when `agy` edits files on disk.
+
+## Features
+
+- **Floating terminal** running `agy`, toggleable from anywhere.
+- **Persistent session** — hiding the window does not kill the conversation.
+- **Context sending** — push the current file (as an `@mention`) or a visual
+  selection straight into the prompt.
+- **Auto-reload** — open buffers refresh when `agy` modifies files on disk.
+- **Resume** — open continuing the most recent conversation (`agy --continue`).
+
+## Requirements
+
+- Neovim >= 0.11 (uses `jobstart({ term = true })`)
+- The [`agy`](https://antigravity.google) CLI available on your `PATH`
+
+## Installation
+
+### lazy.nvim
+
+```lua
+{
+  "denerblack/agy.nvim",
+  lazy = false,
+  config = function()
+    require("agy").setup({
+      -- continue = true,            -- always resume the last conversation
+      -- skip_permissions = true,    -- pass --dangerously-skip-permissions
+      -- args = { "--add-dir", vim.fn.getcwd() },
+    })
+  end,
+  keys = {
+    { "<C-,>", function() require("agy").toggle() end, mode = { "n", "t" }, desc = "Toggle agy" },
+    { "<leader>aa", function() require("agy").toggle() end, desc = "Toggle agy" },
+    { "<leader>ac", "<cmd>AgyContinue<cr>", desc = "agy: continue last conversation" },
+    { "<leader>af", function() require("agy").send_file() end, desc = "agy: send current file" },
+    { "<leader>as", function() require("agy").send_selection() end, mode = "v", desc = "agy: send selection" },
+  },
+}
+```
+
+### packer.nvim
+
+```lua
+use({ "denerblack/agy.nvim", config = function() require("agy").setup() end })
+```
+
+## Usage
+
+| Command             | Action                                            |
+| ------------------- | ------------------------------------------------- |
+| `:Agy`              | Toggle the embedded `agy` terminal                |
+| `:AgyContinue`      | Open `agy` resuming the most recent conversation  |
+| `:AgySendFile`      | Send the current file as an `@mention`            |
+| `:AgySendSelection` | Send the visual selection as context (`:'<,'>`)   |
+
+Inside the terminal, `q` (normal mode) hides the window while keeping the
+session running.
+
+## Configuration
+
+Defaults shown:
+
+```lua
+require("agy").setup({
+  command = "agy",            -- the CLI binary
+  args = {},                  -- extra args appended on every launch
+  float = {
+    width = 0.85,             -- fraction of editor width
+    height = 0.85,            -- fraction of editor height
+    border = "rounded",
+    title = " agy ",
+    title_pos = "center",
+  },
+  continue = false,           -- start with --continue
+  skip_permissions = false,   -- pass --dangerously-skip-permissions
+  auto_reload = true,         -- reload buffers agy edits on disk
+  file_mention = "@%s ",      -- how send_file references a path
+})
+```
+
+## License
+
+MIT
