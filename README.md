@@ -118,6 +118,7 @@ It exposes three tools to agy:
 | `neovim_active_file`  | The file you are editing, with live content (unsaved edits)    |
 | `neovim_selection`    | Your most recent visual selection (file, line range, text)     |
 | `neovim_open_files`   | The list of files open in Neovim                               |
+| `neovim_diagnostics`  | LSP diagnostics for the active file (errors/warnings/hints)    |
 
 ### How it works
 

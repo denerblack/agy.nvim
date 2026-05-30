@@ -81,6 +81,15 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: () => nvimCall("open_files"),
   },
+  {
+    name: "neovim_diagnostics",
+    description:
+      "Get the LSP diagnostics (errors, warnings, info, hints) for the file the " +
+      "user is editing in Neovim, with 1-based line/column positions and a count " +
+      "per severity. Use this to find and fix problems the editor is reporting.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: () => nvimCall("diagnostics"),
+  },
 ];
 
 // ---- MCP stdio JSON-RPC plumbing ---------------------------------------------

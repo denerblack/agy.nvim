@@ -121,4 +121,50 @@ function M.open_files()
   return vim.json.encode({ ok = true, cwd = vim.fn.getcwd(), files = files })
 end
 
+-- LSP diagnostics for a buffer, normalized to 1-based positions.
+local SEVERITY = { "ERROR", "WARN", "INFO", "HINT" }
+local function diag_list(bufnr)
+  local out = {}
+  for _, d in ipairs(vim.diagnostic.get(bufnr)) do
+    out[#out + 1] = {
+      severity = SEVERITY[d.severity] or tostring(d.severity),
+      line = d.lnum + 1,
+      end_line = (d.end_lnum or d.lnum) + 1,
+      col = d.col + 1,
+      message = d.message,
+      source = d.source,
+      code = d.code and tostring(d.code) or nil,
+    }
+  end
+  return out
+end
+
+-- Diagnostics (errors / warnings / info / hints) for the file the user is editing.
+function M.diagnostics()
+  local abs = vim.g.agy_active_file
+  local b = abs and bufnr_for(abs) or -1
+  if b == -1 then
+    local cur = vim.api.nvim_get_current_buf()
+    if vim.bo[cur].buftype == "" and vim.api.nvim_buf_get_name(cur) ~= "" then
+      b, abs = cur, vim.api.nvim_buf_get_name(cur)
+    end
+  end
+  if b == -1 then
+    return vim.json.encode({ ok = false, reason = "no active file buffer" })
+  end
+  local diags = diag_list(b)
+  local counts = { ERROR = 0, WARN = 0, INFO = 0, HINT = 0 }
+  for _, d in ipairs(diags) do
+    counts[d.severity] = (counts[d.severity] or 0) + 1
+  end
+  return vim.json.encode({
+    ok = true,
+    path = relpath(abs),
+    abspath = abs,
+    count = #diags,
+    counts = counts,
+    diagnostics = diags,
+  })
+end
+
 return M
