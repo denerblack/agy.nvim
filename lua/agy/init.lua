@@ -33,10 +33,16 @@ local defaults = {
     finalize_key = "\t",
     -- annotation appended after a finalized mention when lines are selected
     line_range = " (lines %d-%d) ",
-    -- delays (ms) so the picker has time to populate / settle between steps
-    picker_delay = 350,
-    suffix_delay = 120,
+    -- the picker fetches matches asynchronously; poll until our file is listed
+    picker_poll_ms = 80, -- interval between checks for the picker match
+    picker_max_tries = 60, -- ~4.8s ceiling before confirming anyway
+    suffix_delay = 150, -- settle time after confirming, before the line range
+    clear_settle_ms = 300, -- wait after Ctrl-U (clear) before re-typing
   },
+  -- keep agy pointed at the file you are editing: when you switch back to the
+  -- agy window after changing files, the mention is refreshed to the new file
+  -- (only when the prompt holds nothing but an auto-mention, never a question).
+  follow_active_file = true,
 }
 
 ---@type AgyConfig
@@ -48,6 +54,8 @@ local state = {
   win = nil, ---@type integer?
   job = nil, ---@type integer?
   started = false,
+  source_file = nil, ---@type string? last real file the user was editing
+  refreshing = false, ---@type boolean guards against overlapping refreshes
 }
 
 local function is_valid(handle, validator)
@@ -204,12 +212,34 @@ local function capture_context(want_selection)
   return ctx
 end
 
+-- True once agy's file picker has fetched and listed our file as a match.
+-- The picker loads matches asynchronously ("Fetching matches for ..."), so a
+-- fixed delay before confirming is unreliable; we poll the rendered buffer.
+local function picker_match_ready(file)
+  if not buf_alive() then
+    return false
+  end
+  local base = file:match("[^/]+$") or file
+  local saw_match = false
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(state.buf, 0, -1, false)) do
+    if l:find("Fetching matches", 1, true) then
+      return false -- still loading
+    end
+    -- a result row shows the basename next to a "File" label or the full path
+    if l:find(base, 1, true) and (l:find("File", 1, true) or l:find("/" .. base, 1, true)) then
+      saw_match = true
+    end
+  end
+  return saw_match
+end
+
 -- Inject the context into the agy prompt in stages, because typing "@path"
 -- opens agy's workspace file picker that must be confirmed before more text
 -- is typed:
---   1. type "@<relative path>"  -> opens the picker, filtered to the file
---   2. send finalize_key (Tab)  -> confirms the mention, closes the picker
---   3. append a trailing space (and line range for a selection) as plain text
+--   1. type "@<relative path>"          -> opens the picker, filters to the file
+--   2. poll until the match is listed    -> the picker fetches asynchronously
+--   3. send finalize_key (Tab)           -> confirms the mention, closes picker
+--   4. append a trailing space (and line range for a selection) as plain text
 -- The prompt is left ready for the user to type their question; nothing is
 -- submitted.
 local function inject_context(ctx)
@@ -218,7 +248,8 @@ local function inject_context(ctx)
   end
   local c = M.config.context
   vim.fn.chansend(state.job, "@" .. ctx.file)
-  vim.defer_fn(function()
+
+  local function finalize()
     if not state.job then
       return
     end
@@ -233,7 +264,23 @@ local function inject_context(ctx)
       end
       vim.fn.chansend(state.job, suffix)
     end, c.suffix_delay)
-  end, c.picker_delay)
+  end
+
+  local function wait_match(tries)
+    if not state.job or not buf_alive() then
+      return
+    end
+    if picker_match_ready(ctx.file) or tries >= c.picker_max_tries then
+      finalize()
+    else
+      vim.defer_fn(function()
+        wait_match(tries + 1)
+      end, c.picker_poll_ms)
+    end
+  end
+  vim.defer_fn(function()
+    wait_match(0)
+  end, c.picker_poll_ms)
 end
 
 -- agy's TUI can take several seconds to boot. We poll the terminal buffer
@@ -292,6 +339,87 @@ local function open_with_context(ctx)
     return
   end
   inject_when_ready(ctx, fresh)
+end
+
+-- Remember the file the user is editing, so we can keep agy pointed at it.
+local function record_source()
+  local buf = vim.api.nvim_get_current_buf()
+  if buf == state.buf or vim.bo[buf].buftype ~= "" then
+    return
+  end
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name ~= "" then
+    state.source_file = vim.fn.fnamemodify(name, ":.")
+  end
+end
+
+-- Read the current text in agy's prompt input line ("> ..."), or nil if it
+-- can't be determined (e.g. the TUI hasn't drawn the box yet).
+local function prompt_input()
+  if not buf_alive() then
+    return nil
+  end
+  local lines = vim.api.nvim_buf_get_lines(state.buf, 0, -1, false)
+  for i = #lines, 1, -1 do
+    local content = lines[i]:match("^>%s*(.-)%s*$")
+    if content ~= nil then
+      return content
+    end
+  end
+  return nil
+end
+
+-- True when the prompt holds only an auto-injected mention (or is empty), so
+-- it is safe to replace without destroying a question the user is typing.
+local function is_replaceable(text)
+  if text == nil then
+    return false
+  end
+  if text == "" then
+    return true
+  end
+  if text:match("^@%S+%s*$") then
+    return true
+  end
+  if text:match("^@%S+%s*%(lines%s+%d+%-%d+%)%s*$") then
+    return true
+  end
+  return false
+end
+
+-- Refresh agy's mention to the file the user is now editing. Runs when the
+-- agy window is re-entered; no-ops if the prompt holds a real question or
+-- already references the current file.
+local function refresh_context()
+  if state.refreshing then
+    return -- a refresh is already mid-flight; the terminal updates async
+  end
+  if not (M.config.auto_context and M.config.follow_active_file) then
+    return
+  end
+  if not (state.started and buf_alive() and state.job and state.source_file) then
+    return
+  end
+  local cur = prompt_input()
+  if not is_replaceable(cur) then
+    return -- the user has typed something; leave it alone
+  end
+  if cur ~= "" and cur:match("^@(%S+)") == state.source_file then
+    return -- already pointed at this file
+  end
+  state.refreshing = true
+  local c = M.config.context
+  vim.fn.chansend(state.job, "\21") -- Ctrl-U: clear the input line
+  -- let the clear fully process before re-typing, else the new "@path" is
+  -- appended to the old mention and the picker searches a garbled string
+  vim.defer_fn(function()
+    inject_context({ file = state.source_file })
+  end, c.clear_settle_ms)
+  -- release the guard after the worst-case inject duration plus a margin
+  local budget = c.clear_settle_ms + c.picker_poll_ms * (c.picker_max_tries + 2) + c.suffix_delay + 600
+  vim.defer_fn(function()
+    state.refreshing = false
+  end, budget)
 end
 
 -- Toggle the agy terminal. When opening from a code buffer, the active file
@@ -354,10 +482,30 @@ function M.setup(opts)
     M.send_selection()
   end, { range = true, desc = "Send the visual selection to agy" })
 
+  local group = vim.api.nvim_create_augroup("agy", { clear = true })
+
   -- Reload edited files when we return to a normal buffer
   vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
-    group = vim.api.nvim_create_augroup("agy_autoreload", { clear = true }),
+    group = group,
     callback = reload_changed_files,
+  })
+
+  -- Remember the file the user is editing (ignores the agy terminal itself).
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = group,
+    callback = record_source,
+  })
+
+  -- Keep agy pointed at the active file: entering the agy window refreshes the
+  -- mention to whatever file you were last editing. WinEnter (not BufEnter)
+  -- fires exactly once per focus change, avoiding overlapping refreshes.
+  vim.api.nvim_create_autocmd("WinEnter", {
+    group = group,
+    callback = function()
+      if vim.api.nvim_get_current_buf() == state.buf then
+        refresh_context()
+      end
+    end,
   })
 end
 

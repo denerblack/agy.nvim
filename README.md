@@ -17,6 +17,9 @@ files on disk.
   it from visual mode, the way Copilot Chat pulls in the current context. It waits
   for the TUI to finish booting before typing, then leaves the prompt ready for
   your question without submitting.
+- **Follows the active file** — switch files and return to the agy split, and the
+  mention updates to the file you are now editing (only while the prompt holds
+  nothing but an auto-mention — a question you are typing is never clobbered).
 - **Auto-reload** — open buffers refresh when `agy` modifies files on disk.
 - **Resume** — open continuing the most recent conversation (`agy --continue`).
 
@@ -84,11 +87,14 @@ require("agy").setup({
   skip_permissions = false,   -- pass --dangerously-skip-permissions
   auto_reload = true,         -- reload buffers agy edits on disk
   auto_context = true,        -- attach active file/selection when opening agy
+  follow_active_file = true,  -- refresh the mention when you switch files
   context = {
     finalize_key = "\t",            -- confirms agy's @file picker (Tab)
     line_range = " (lines %d-%d) ", -- appended for a visual selection
-    picker_delay = 350,             -- ms to let the picker populate
-    suffix_delay = 120,             -- ms before appending the line range
+    picker_poll_ms = 80,            -- poll interval while the picker fetches
+    picker_max_tries = 60,          -- ceiling before confirming anyway (~4.8s)
+    suffix_delay = 150,             -- ms before appending the line range
+    clear_settle_ms = 300,          -- ms after clearing before re-typing
   },
 })
 ```
