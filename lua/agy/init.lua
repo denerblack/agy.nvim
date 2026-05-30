@@ -62,12 +62,31 @@ local function is_valid(handle, validator)
   return handle ~= nil and validator(handle)
 end
 
-local function win_open()
-  return is_valid(state.win, vim.api.nvim_win_is_valid)
-end
-
 local function buf_alive()
   return is_valid(state.buf, vim.api.nvim_buf_is_valid)
+end
+
+-- Find a window already displaying the agy buffer (preferring the tracked one)
+-- and sync state.win to it. Returns the window id, or nil if agy isn't on screen.
+-- This is what stops a second split from opening when agy is already visible.
+local function agy_win()
+  if not buf_alive() then
+    return nil
+  end
+  if is_valid(state.win, vim.api.nvim_win_is_valid) and vim.api.nvim_win_get_buf(state.win) == state.buf then
+    return state.win
+  end
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == state.buf then
+      state.win = win -- adopt the existing window
+      return win
+    end
+  end
+  return nil
+end
+
+local function win_open()
+  return agy_win() ~= nil
 end
 
 -- Open a full-height vertical split for the agy buffer and return its window id.
