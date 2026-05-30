@@ -3,13 +3,14 @@
 Embedded [Antigravity CLI](https://antigravity.google) (`agy`) inside Neovim — a
 floating-terminal integration in the spirit of the Claude Code editor plugin.
 
-Run the `agy` agent in a toggleable floating window, keep the session alive
-across toggles, send the current file or visual selection as context, and have
-buffers auto-reload when `agy` edits files on disk.
+Run the `agy` agent in a full-height editor split (right by default, like
+Claude Code), keep the session alive across toggles, send the current file or
+visual selection as context, and have buffers auto-reload when `agy` edits
+files on disk.
 
 ## Features
 
-- **Floating terminal** running `agy`, toggleable from anywhere.
+- **Editor split** running `agy` on the right (or left), toggleable from anywhere.
 - **Persistent session** — hiding the window does not kill the conversation.
 - **Context sending** — push the current file (as an `@mention`) or a visual
   selection straight into the prompt.
@@ -72,12 +73,9 @@ Defaults shown:
 require("agy").setup({
   command = "agy",            -- the CLI binary
   args = {},                  -- extra args appended on every launch
-  float = {
-    width = 0.85,             -- fraction of editor width
-    height = 0.85,            -- fraction of editor height
-    border = "rounded",
-    title = " agy ",
-    title_pos = "center",
+  split = {
+    side = "right",          -- "right" | "left" — full-height editor split
+    width = 0.40,            -- fraction of total columns
   },
   continue = false,           -- start with --continue
   skip_permissions = false,   -- pass --dangerously-skip-permissions

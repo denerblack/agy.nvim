@@ -1,6 +1,7 @@
 -- agy.nvim — embedded Antigravity CLI (agy) inside Neovim
--- Floating terminal that runs the `agy` agent, with session persistence,
--- file/selection context sending, and auto-reload of files agy edits.
+-- Runs the `agy` agent in a full-height editor split (right by default, like
+-- Claude Code), with session persistence, file/selection context sending, and
+-- auto-reload of files agy edits.
 --
 -- Inspired by the Claude Code editor integration, tailored to the `agy` CLI.
 
@@ -11,13 +12,10 @@ local defaults = {
   command = "agy", -- the CLI binary
   -- extra args appended on every launch, e.g. { "--add-dir", vim.fn.getcwd() }
   args = {},
-  -- floating window geometry (fractions of the editor size)
-  float = {
-    width = 0.85,
-    height = 0.85,
-    border = "rounded",
-    title = " agy ",
-    title_pos = "center",
+  -- editor split layout (Claude-style): a full-height vertical split.
+  split = {
+    side = "right", -- "right" | "left"
+    width = 0.40, -- fraction of total columns
   },
   -- start agy with --continue (resume most recent conversation) the first time
   continue = false,
@@ -52,24 +50,20 @@ local function buf_alive()
   return is_valid(state.buf, vim.api.nvim_buf_is_valid)
 end
 
--- Build the float window config from M.config.float
-local function float_opts()
-  local f = M.config.float
-  local cols = vim.o.columns
-  local lines = vim.o.lines
-  local width = math.floor(cols * f.width)
-  local height = math.floor(lines * f.height)
-  return {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = math.floor((lines - height) / 2),
-    col = math.floor((cols - width) / 2),
-    style = "minimal",
-    border = f.border,
-    title = f.title,
-    title_pos = f.title_pos,
-  }
+-- Open a full-height vertical split for the agy buffer and return its window id.
+-- "botright"/"topleft" make the split span the entire editor height on the
+-- far right/left edge, matching the Claude Code layout.
+local function open_split()
+  local s = M.config.split
+  local placement = s.side == "left" and "topleft" or "botright"
+  vim.cmd(placement .. " vsplit")
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, state.buf)
+  local width = math.floor(vim.o.columns * s.width)
+  vim.api.nvim_win_set_width(win, width)
+  -- keep the split fixed-width so other windows don't squeeze it on resize
+  vim.wo[win].winfixwidth = true
+  return win
 end
 
 -- Build the shell command list to launch agy
@@ -100,7 +94,7 @@ local function reload_changed_files()
   end)
 end
 
--- Open (or focus) the floating window. Creates the terminal on first use.
+-- Open (or focus) the agy split. Creates the terminal on first use.
 function M.open()
   if not buf_alive() then
     state.buf = vim.api.nvim_create_buf(false, true)
@@ -108,9 +102,7 @@ function M.open()
   end
 
   if not win_open() then
-    state.win = vim.api.nvim_open_win(state.buf, true, float_opts())
-    vim.wo[state.win].winhl = "Normal:Normal,FloatBorder:FloatBorder"
-    vim.wo[state.win].winblend = 0
+    state.win = open_split()
   else
     vim.api.nvim_set_current_win(state.win)
   end
