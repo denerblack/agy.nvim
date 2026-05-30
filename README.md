@@ -50,8 +50,9 @@ files on disk.
     { "<C-,>", function() require("agy").toggle() end, mode = { "n", "t" }, desc = "Toggle agy" },
     { "<leader>aa", function() require("agy").toggle() end, desc = "Toggle agy" },
     { "<leader>ac", "<cmd>AgyContinue<cr>", desc = "agy: continue last conversation" },
-    { "<leader>af", function() require("agy").send_file() end, desc = "agy: send current file" },
-    { "<leader>as", function() require("agy").send_selection() end, mode = "v", desc = "agy: send selection" },
+    { "<leader>af", "<cmd>AgySendFile<cr>", desc = "agy: send current file" },
+    -- visual: use the range-aware command (range-safe; avoids E481 "No range allowed")
+    { "<leader>as", "<cmd>AgySendSelection<cr>", mode = "v", desc = "agy: send selection" },
   },
 }
 ```
