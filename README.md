@@ -12,9 +12,11 @@ files on disk.
 
 - **Editor split** running `agy` on the right (or left), toggleable from anywhere.
 - **Persistent session** — hiding the window does not kill the conversation.
-- **Automatic context** — opening agy attaches the active file (as an `@mention`),
-  and the selected line range when you open it from visual mode, the way Copilot
-  Chat pulls in the current context.
+- **Automatic context** — opening agy attaches the active file (as an `@mention`,
+  confirmed through agy's file picker), and the selected line range when you open
+  it from visual mode, the way Copilot Chat pulls in the current context. It waits
+  for the TUI to finish booting before typing, then leaves the prompt ready for
+  your question without submitting.
 - **Auto-reload** — open buffers refresh when `agy` modifies files on disk.
 - **Resume** — open continuing the most recent conversation (`agy --continue`).
 
@@ -83,8 +85,10 @@ require("agy").setup({
   auto_reload = true,         -- reload buffers agy edits on disk
   auto_context = true,        -- attach active file/selection when opening agy
   context = {
-    file = "@%s ",                    -- %s = relative path
-    selection = "@%s (lines %d-%d) ", -- path, start line, end line
+    finalize_key = "\t",            -- confirms agy's @file picker (Tab)
+    line_range = " (lines %d-%d) ", -- appended for a visual selection
+    picker_delay = 350,             -- ms to let the picker populate
+    suffix_delay = 120,             -- ms before appending the line range
   },
 })
 ```

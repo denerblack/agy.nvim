@@ -26,10 +26,16 @@ local defaults = {
   -- automatically attach the active file (and visual selection) to the prompt
   -- whenever agy is opened, the way Copilot Chat pulls in the current context.
   auto_context = true,
-  -- how that context is written into the prompt (Claude-style "@path" mentions)
   context = {
-    file = "@%s ", -- %s = relative path
-    selection = "@%s (lines %d-%d) ", -- relative path, start line, end line
+    -- Typing "@path" opens agy's workspace file picker; this key confirms the
+    -- highlighted match so the mention is finalized (Tab = Complete, safe —
+    -- it never submits the prompt; "\r" would Select instead).
+    finalize_key = "\t",
+    -- annotation appended after a finalized mention when lines are selected
+    line_range = " (lines %d-%d) ",
+    -- delays (ms) so the picker has time to populate / settle between steps
+    picker_delay = 350,
+    suffix_delay = 120,
   },
 }
 
@@ -198,15 +204,84 @@ local function capture_context(want_selection)
   return ctx
 end
 
--- Render a context table into the prompt mention string.
-local function context_string(ctx)
-  if not ctx or not ctx.file then
-    return nil
+-- Inject the context into the agy prompt in stages, because typing "@path"
+-- opens agy's workspace file picker that must be confirmed before more text
+-- is typed:
+--   1. type "@<relative path>"  -> opens the picker, filtered to the file
+--   2. send finalize_key (Tab)  -> confirms the mention, closes the picker
+--   3. append a trailing space (and line range for a selection) as plain text
+-- The prompt is left ready for the user to type their question; nothing is
+-- submitted.
+local function inject_context(ctx)
+  if not ctx or not ctx.file or not state.job then
+    return
   end
-  if ctx.srow then
-    return string.format(M.config.context.selection, ctx.file, ctx.srow, ctx.erow)
+  local c = M.config.context
+  vim.fn.chansend(state.job, "@" .. ctx.file)
+  vim.defer_fn(function()
+    if not state.job then
+      return
+    end
+    vim.fn.chansend(state.job, c.finalize_key)
+    vim.defer_fn(function()
+      if not state.job then
+        return
+      end
+      local suffix = " "
+      if ctx.srow then
+        suffix = string.format(c.line_range, ctx.srow, ctx.erow)
+      end
+      vim.fn.chansend(state.job, suffix)
+    end, c.suffix_delay)
+  end, c.picker_delay)
+end
+
+-- agy's TUI can take several seconds to boot. We poll the terminal buffer
+-- until its input box has rendered before typing context into it; sending
+-- too early silently drops the keystrokes.
+local READY_POLL_MS = 100
+local READY_MAX_TRIES = 150 -- ~15s ceiling before sending anyway
+local READY_CUSHION_MS = 400 -- settle time after the box appears
+
+-- True once agy has drawn its input box (a horizontal rule of box chars),
+-- which means it is accepting typed input.
+local function tui_ready()
+  if not buf_alive() then
+    return false
   end
-  return string.format(M.config.context.file, ctx.file)
+  for _, l in ipairs(vim.api.nvim_buf_get_lines(state.buf, 0, -1, false)) do
+    -- the prompt box is delimited by long runs of U+2500 ("─")
+    if l:find("────") then
+      return true
+    end
+  end
+  return false
+end
+
+-- Inject context once the TUI is ready (or immediately if already running).
+local function inject_when_ready(ctx, fresh)
+  if not ctx then
+    return
+  end
+  if not fresh then
+    inject_context(ctx) -- session already running: picker responds at once
+    return
+  end
+  local function attempt(tries)
+    if not state.job or not buf_alive() then
+      return
+    end
+    if tui_ready() or tries >= READY_MAX_TRIES then
+      vim.defer_fn(function()
+        inject_context(ctx)
+      end, READY_CUSHION_MS)
+    else
+      vim.defer_fn(function()
+        attempt(tries + 1)
+      end, READY_POLL_MS)
+    end
+  end
+  attempt(0)
 end
 
 -- Open agy and prefill the prompt with the given context (file / selection).
@@ -216,16 +291,7 @@ local function open_with_context(ctx)
   if not M.config.auto_context then
     return
   end
-  local str = context_string(ctx)
-  if not str then
-    return
-  end
-  -- a freshly launched TUI needs a moment before it accepts input
-  vim.defer_fn(function()
-    if state.job then
-      vim.fn.chansend(state.job, str)
-    end
-  end, fresh and 200 or 40)
+  inject_when_ready(ctx, fresh)
 end
 
 -- Toggle the agy terminal. When opening from a code buffer, the active file
