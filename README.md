@@ -1,7 +1,7 @@
 # agy.nvim
 
-Embedded [Antigravity CLI](https://antigravity.google) (`agy`) inside Neovim — a
-floating-terminal integration in the spirit of the Claude Code editor plugin.
+Embedded [Antigravity CLI](https://antigravity.google) (`agy`) inside Neovim — an
+editor-split integration in the spirit of the Claude Code editor plugin.
 
 Run the `agy` agent in a full-height editor split (right by default, like
 Claude Code), keep the session alive across toggles, send the current file or
@@ -10,7 +10,8 @@ files on disk.
 
 ## Features
 
-- **Editor split** running `agy` on the right (or left), toggleable from anywhere.
+- **Editor split** running `agy` on the right (or left), toggleable from anywhere;
+  reused (never duplicated) if a session is already on screen.
 - **Persistent session** — hiding the window does not kill the conversation.
 - **Automatic context** — opening agy attaches the active file (as an `@mention`,
   confirmed through agy's file picker), and the selected line range when you open
@@ -23,13 +24,14 @@ files on disk.
 - **Auto-reload** — open buffers refresh when `agy` modifies files on disk.
 - **Resume** — open continuing the most recent conversation (`agy --continue`).
 - **MCP bridge (optional)** — lets agy *query* your editor on demand (active file
-  with unsaved edits, visual selection, open files) over MCP, the robust
-  equivalent of an IDE integration. See [MCP bridge](#mcp-bridge).
+  with unsaved edits, visual selection, open files, LSP diagnostics) over MCP, the
+  robust equivalent of an IDE integration. See [MCP bridge](#mcp-bridge).
 
 ## Requirements
 
 - Neovim >= 0.11 (uses `jobstart({ term = true })`)
 - The [`agy`](https://antigravity.google) CLI available on your `PATH`
+- `node` on your `PATH` — only for the optional [MCP bridge](#mcp-bridge)
 
 ## Installation
 
@@ -67,11 +69,14 @@ use({ "denerblack/agy.nvim", config = function() require("agy").setup() end })
 
 | Command             | Action                                            |
 | ------------------- | ------------------------------------------------- |
-| `:Agy`              | Toggle the embedded `agy` terminal                |
+| `:Agy`              | Toggle agy (or send the selection when given a range) |
 | `:AgyContinue`      | Open `agy` resuming the most recent conversation  |
 | `:AgySendFile`      | Send the current file as an `@mention`            |
 | `:AgySendSelection` | Send the visual selection as context (`:'<,'>`)   |
 | `:AgyMcpInstall`    | Register the MCP bridge in agy's `mcp_config.json`|
+
+All commands accept a range, so calling them from visual mode (where `:` inserts
+`'<,'>`) never errors. `:'<,'>Agy` sends the selection; a bare `:Agy` toggles.
 
 Inside the terminal, `q` (normal mode) hides the window while keeping the
 session running.
@@ -111,7 +116,7 @@ bridge is the complementary half: it lets agy **pull** your live editor state on
 demand — the robust equivalent of the Claude Code editor integration, over the
 channel agy actually supports (MCP).
 
-It exposes three tools to agy:
+It exposes these tools to agy:
 
 | Tool                  | Returns                                                        |
 | --------------------- | -------------------------------------------------------------- |
