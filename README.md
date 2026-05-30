@@ -22,6 +22,9 @@ files on disk.
   nothing but an auto-mention — a question you are typing is never clobbered).
 - **Auto-reload** — open buffers refresh when `agy` modifies files on disk.
 - **Resume** — open continuing the most recent conversation (`agy --continue`).
+- **MCP bridge (optional)** — lets agy *query* your editor on demand (active file
+  with unsaved edits, visual selection, open files) over MCP, the robust
+  equivalent of an IDE integration. See [MCP bridge](#mcp-bridge).
 
 ## Requirements
 
@@ -67,6 +70,7 @@ use({ "denerblack/agy.nvim", config = function() require("agy").setup() end })
 | `:AgyContinue`      | Open `agy` resuming the most recent conversation  |
 | `:AgySendFile`      | Send the current file as an `@mention`            |
 | `:AgySendSelection` | Send the visual selection as context (`:'<,'>`)   |
+| `:AgyMcpInstall`    | Register the MCP bridge in agy's `mcp_config.json`|
 
 Inside the terminal, `q` (normal mode) hides the window while keeping the
 session running.
@@ -98,6 +102,58 @@ require("agy").setup({
   },
 })
 ```
+
+## MCP bridge
+
+The terminal `@mention` injection above *pushes* context into the prompt. The MCP
+bridge is the complementary half: it lets agy **pull** your live editor state on
+demand — the robust equivalent of the Claude Code editor integration, over the
+channel agy actually supports (MCP).
+
+It exposes three tools to agy:
+
+| Tool                  | Returns                                                        |
+| --------------------- | -------------------------------------------------------------- |
+| `neovim_active_file`  | The file you are editing, with live content (unsaved edits)    |
+| `neovim_selection`    | Your most recent visual selection (file, line range, text)     |
+| `neovim_open_files`   | The list of files open in Neovim                               |
+
+### How it works
+
+agy runs inside Neovim's `:terminal`, so it inherits `$NVIM` — the RPC socket of
+the very Neovim instance hosting it. A tiny zero-dependency Node MCP server
+(`mcp/nvim-mcp-server.mjs`) connects back to that socket (via
+`nvim --server $NVIM --remote-expr`) and answers the tool calls. No `nvr`, no
+extra daemon.
+
+```
+agy ──(MCP/stdio)──► nvim-mcp-server.mjs ──($NVIM socket)──► Neovim
+     calls neovim_active_file              reads the active file/selection
+```
+
+### Setup
+
+Requires `node` on your `PATH`. Then register the server in agy's config:
+
+```vim
+:AgyMcpInstall
+```
+
+This merges an entry into `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "neovim": { "command": "node", "args": ["/abs/path/to/agy.nvim/mcp/nvim-mcp-server.mjs"] }
+  }
+}
+```
+
+Restart `agy` (toggle it closed/open) so it loads the new MCP server. agy will
+call the `neovim_*` tools when you ask about "this file" / "the selection".
+
+> The bridge is optional — without it, the terminal `@mention` auto-context still
+> works. With it, agy also sees unsaved edits and can fetch context itself.
 
 ## License
 

@@ -1,0 +1,124 @@
+-- agy.nvim — Neovim introspection for the MCP bridge.
+--
+-- These functions are invoked from the companion MCP server (mcp/nvim-mcp-server.mjs)
+-- via `nvim --server $NVIM --remote-expr "luaeval('require([[agy.mcp]]).<fn>()')"`.
+-- Each returns a JSON string so the Node side can JSON.parse it directly.
+--
+-- "Active file" / "selection" are tracked by the plugin (see require('agy').setup)
+-- into vim.g.agy_active_file / vim.g.agy_selection, because when agy is focused in
+-- its terminal split the live "current window" is the terminal, not your code.
+
+local M = {}
+
+local MAX_CONTENT_BYTES = 200 * 1024 -- cap file content shipped to the agent
+
+local function relpath(abs)
+  if not abs or abs == "" then
+    return abs
+  end
+  return vim.fn.fnamemodify(abs, ":.")
+end
+
+-- Find a loaded, listed buffer for the given absolute path.
+local function bufnr_for(abs)
+  if not abs or abs == "" then
+    return -1
+  end
+  local b = vim.fn.bufnr(abs)
+  if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then
+    return b
+  end
+  return -1
+end
+
+-- Read a file's current text, preferring the live buffer (unsaved edits) and
+-- falling back to disk. Returns content, line_count, truncated.
+local function read_content(abs)
+  local lines
+  local b = bufnr_for(abs)
+  if b ~= -1 then
+    lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  elseif vim.fn.filereadable(abs) == 1 then
+    lines = vim.fn.readfile(abs)
+  else
+    return nil, 0, false
+  end
+  local count = #lines
+  local text = table.concat(lines, "\n")
+  local truncated = false
+  if #text > MAX_CONTENT_BYTES then
+    text = text:sub(1, MAX_CONTENT_BYTES)
+    truncated = true
+  end
+  return text, count, truncated
+end
+
+-- The file the user is editing (tracked), with its current content.
+function M.active_file()
+  local abs = vim.g.agy_active_file
+  if (not abs or abs == "") then
+    -- fall back to the current buffer if it is a normal named file
+    local cur = vim.api.nvim_get_current_buf()
+    if vim.bo[cur].buftype == "" then
+      local name = vim.api.nvim_buf_get_name(cur)
+      if name ~= "" then
+        abs = name
+      end
+    end
+  end
+  if not abs or abs == "" then
+    return vim.json.encode({ ok = false, reason = "no active file" })
+  end
+  local content, count, truncated = read_content(abs)
+  return vim.json.encode({
+    ok = content ~= nil,
+    path = relpath(abs),
+    abspath = abs,
+    line_count = count,
+    truncated = truncated,
+    content = content,
+  })
+end
+
+-- The most recent visual selection (tracked on leaving visual mode).
+function M.selection()
+  local s = vim.g.agy_selection
+  if type(s) ~= "table" or not s.abspath then
+    return vim.json.encode({ ok = false, reason = "no selection" })
+  end
+  -- refresh the text from the live buffer in case it changed
+  local b = bufnr_for(s.abspath)
+  local text = s.text
+  if b ~= -1 and s.start_line and s.end_line then
+    local lines = vim.api.nvim_buf_get_lines(b, s.start_line - 1, s.end_line, false)
+    text = table.concat(lines, "\n")
+  end
+  return vim.json.encode({
+    ok = true,
+    path = relpath(s.abspath),
+    abspath = s.abspath,
+    start_line = s.start_line,
+    end_line = s.end_line,
+    text = text,
+  })
+end
+
+-- All open, named, normal-file buffers.
+function M.open_files()
+  local files = {}
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buftype == "" then
+      local name = vim.api.nvim_buf_get_name(b)
+      if name ~= "" then
+        files[#files + 1] = {
+          path = relpath(name),
+          abspath = name,
+          modified = vim.bo[b].modified,
+        }
+      end
+    end
+  end
+  return vim.json.encode({ ok = true, cwd = vim.fn.getcwd(), files = files })
+end
+
+return M

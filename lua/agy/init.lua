@@ -341,7 +341,8 @@ local function open_with_context(ctx)
   inject_when_ready(ctx, fresh)
 end
 
--- Remember the file the user is editing, so we can keep agy pointed at it.
+-- Remember the file the user is editing, so we can keep agy pointed at it and
+-- expose it to the MCP bridge (vim.g.agy_active_file holds the absolute path).
 local function record_source()
   local buf = vim.api.nvim_get_current_buf()
   if buf == state.buf or vim.bo[buf].buftype ~= "" then
@@ -350,7 +351,35 @@ local function record_source()
   local name = vim.api.nvim_buf_get_name(buf)
   if name ~= "" then
     state.source_file = vim.fn.fnamemodify(name, ":.")
+    vim.g.agy_active_file = name -- absolute path, for the MCP server
   end
+end
+
+-- Record the visual selection (file + range + text) when leaving visual mode,
+-- so the MCP bridge can report it via vim.g.agy_selection.
+local function record_selection()
+  local buf = vim.api.nvim_get_current_buf()
+  if buf == state.buf or vim.bo[buf].buftype ~= "" then
+    return
+  end
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name == "" then
+    return
+  end
+  local srow, erow = vim.fn.line("'<"), vim.fn.line("'>")
+  if srow <= 0 or erow <= 0 then
+    return
+  end
+  if srow > erow then
+    srow, erow = erow, srow
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, srow - 1, erow, false)
+  vim.g.agy_selection = {
+    abspath = name,
+    start_line = srow,
+    end_line = erow,
+    text = table.concat(lines, "\n"),
+  }
 end
 
 -- Read the current text in agy's prompt input line ("> ..."), or nil if it
@@ -453,6 +482,55 @@ function M.send_selection()
   open_with_context(ctx)
 end
 
+-- Locate the bundled MCP server script on the runtimepath.
+local function mcp_server_path()
+  local found = vim.api.nvim_get_runtime_file("mcp/nvim-mcp-server.mjs", false)
+  return found and found[1] or nil
+end
+
+-- Register the MCP bridge in agy's mcp_config.json so agy can query the active
+-- file / selection / open files via the neovim_* tools. Merges into any existing
+-- config. Returns true on success.
+---@param config_path? string defaults to ~/.gemini/config/mcp_config.json
+function M.mcp_install(config_path)
+  local server = mcp_server_path()
+  if not server then
+    vim.notify("agy: could not locate mcp/nvim-mcp-server.mjs on runtimepath", vim.log.levels.ERROR)
+    return false
+  end
+  if vim.fn.executable("node") == 0 then
+    vim.notify("agy: 'node' not found on PATH (required by the MCP server)", vim.log.levels.ERROR)
+    return false
+  end
+  config_path = config_path or vim.fn.expand("~/.gemini/config/mcp_config.json")
+
+  local cfg = {}
+  if vim.fn.filereadable(config_path) == 1 then
+    local raw = table.concat(vim.fn.readfile(config_path), "\n")
+    if raw:match("%S") then
+      local ok, decoded = pcall(vim.json.decode, raw)
+      if ok and type(decoded) == "table" then
+        cfg = decoded
+      else
+        vim.notify("agy: existing mcp_config.json is invalid JSON; aborting", vim.log.levels.ERROR)
+        return false
+      end
+    end
+  end
+
+  cfg.mcpServers = cfg.mcpServers or {}
+  cfg.mcpServers.neovim = { command = "node", args = { server } }
+
+  vim.fn.mkdir(vim.fn.fnamemodify(config_path, ":h"), "p")
+  local json = vim.json.encode(cfg)
+  if vim.fn.writefile({ json }, config_path) ~= 0 then
+    vim.notify("agy: failed to write " .. config_path, vim.log.levels.ERROR)
+    return false
+  end
+  vim.notify("agy: MCP bridge registered (" .. server .. "). Restart agy to load it.", vim.log.levels.INFO)
+  return true
+end
+
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
@@ -482,6 +560,16 @@ function M.setup(opts)
     M.send_selection()
   end, { range = true, desc = "Send the visual selection to agy" })
 
+  vim.api.nvim_create_user_command("AgyMcpInstall", function()
+    M.mcp_install()
+  end, { desc = "Register the agy.nvim MCP bridge in agy's mcp_config.json" })
+
+  -- ensure this Neovim is reachable over RPC; agy (in the embedded terminal)
+  -- inherits $NVIM pointing here, and the MCP server connects back to it.
+  if vim.v.servername == nil or vim.v.servername == "" then
+    pcall(vim.fn.serverstart)
+  end
+
   local group = vim.api.nvim_create_augroup("agy", { clear = true })
 
   -- Reload edited files when we return to a normal buffer
@@ -494,6 +582,13 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("BufEnter", {
     group = group,
     callback = record_source,
+  })
+
+  -- Track the visual selection (for the MCP bridge) when leaving visual mode.
+  vim.api.nvim_create_autocmd("ModeChanged", {
+    group = group,
+    pattern = "[vV\x16]*:*", -- leaving visual / visual-block
+    callback = record_selection,
   })
 
   -- Keep agy pointed at the active file: entering the agy window refreshes the
