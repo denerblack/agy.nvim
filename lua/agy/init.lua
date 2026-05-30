@@ -537,9 +537,16 @@ function M.setup(opts)
   -- Make autoread effective so reload_changed_files actually swaps content
   vim.o.autoread = true
 
-  vim.api.nvim_create_user_command("Agy", function()
-    M.toggle()
-  end, { desc = "Toggle the embedded agy terminal" })
+  -- range = true on these commands so calling them from visual mode (where ":"
+  -- auto-inserts "'<,'>") never errors with E481 "No range allowed". :Agy with
+  -- a range sends the selection; without one it just toggles.
+  vim.api.nvim_create_user_command("Agy", function(o)
+    if o.range > 0 then
+      M.send_selection()
+    else
+      M.toggle()
+    end
+  end, { range = true, desc = "Toggle agy (or send the selection when given a range)" })
 
   vim.api.nvim_create_user_command("AgyContinue", function()
     -- relaunch with --continue: kill current session, reset, reopen
@@ -550,11 +557,11 @@ function M.setup(opts)
     M.config.continue = true
     M.open()
     M.config.continue = prev
-  end, { desc = "Open agy resuming the most recent conversation" })
+  end, { range = true, desc = "Open agy resuming the most recent conversation" })
 
   vim.api.nvim_create_user_command("AgySendFile", function()
     M.send_file()
-  end, { desc = "Send the current file as an @mention to agy" })
+  end, { range = true, desc = "Send the current file as an @mention to agy" })
 
   vim.api.nvim_create_user_command("AgySendSelection", function()
     M.send_selection()
