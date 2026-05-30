@@ -23,8 +23,14 @@ local defaults = {
   skip_permissions = false,
   -- reload buffers when agy modifies files on disk
   auto_reload = true,
-  -- mention syntax used to reference a file in the prompt (Claude-style "@path")
-  file_mention = "@%s ",
+  -- automatically attach the active file (and visual selection) to the prompt
+  -- whenever agy is opened, the way Copilot Chat pulls in the current context.
+  auto_context = true,
+  -- how that context is written into the prompt (Claude-style "@path" mentions)
+  context = {
+    file = "@%s ", -- %s = relative path
+    selection = "@%s (lines %d-%d) ", -- relative path, start line, end line
+  },
 }
 
 ---@type AgyConfig
@@ -146,16 +152,7 @@ function M.hide()
   reload_changed_files()
 end
 
--- Toggle visibility of the agy terminal.
-function M.toggle()
-  if win_open() then
-    M.hide()
-  else
-    M.open()
-  end
-end
-
--- Send raw text to the agy prompt (types into the TUI).
+-- Send raw text to the agy prompt (types into the TUI, no submit).
 ---@param text string
 function M.send(text)
   if not state.job then
@@ -170,39 +167,96 @@ function M.submit(text)
   M.send(text .. "\r")
 end
 
+-- Capture context from the CURRENT window — must run before agy is focused,
+-- otherwise the "current file" becomes the agy terminal itself.
+-- Returns { file = relpath, srow?, erow? } or nil when there's no real file.
+---@param want_selection boolean
+local function capture_context(want_selection)
+  local buf = vim.api.nvim_get_current_buf()
+  if buf == state.buf then
+    return nil -- already inside agy; nothing to attach
+  end
+  local path = vim.api.nvim_buf_get_name(buf)
+  if path == "" or vim.bo[buf].buftype ~= "" then
+    return nil -- scratch/terminal/no-name buffer
+  end
+  local ctx = { file = vim.fn.fnamemodify(path, ":.") }
+  if want_selection then
+    local srow, erow
+    if vim.fn.mode():match("[vV\22]") then
+      srow, erow = vim.fn.line("v"), vim.fn.line(".") -- live visual selection
+    else
+      srow, erow = vim.fn.line("'<"), vim.fn.line("'>") -- last visual marks
+    end
+    if srow and erow and srow > 0 and erow > 0 then
+      if srow > erow then
+        srow, erow = erow, srow
+      end
+      ctx.srow, ctx.erow = srow, erow
+    end
+  end
+  return ctx
+end
+
+-- Render a context table into the prompt mention string.
+local function context_string(ctx)
+  if not ctx or not ctx.file then
+    return nil
+  end
+  if ctx.srow then
+    return string.format(M.config.context.selection, ctx.file, ctx.srow, ctx.erow)
+  end
+  return string.format(M.config.context.file, ctx.file)
+end
+
+-- Open agy and prefill the prompt with the given context (file / selection).
+local function open_with_context(ctx)
+  local fresh = not state.started
+  M.open()
+  if not M.config.auto_context then
+    return
+  end
+  local str = context_string(ctx)
+  if not str then
+    return
+  end
+  -- a freshly launched TUI needs a moment before it accepts input
+  vim.defer_fn(function()
+    if state.job then
+      vim.fn.chansend(state.job, str)
+    end
+  end, fresh and 200 or 40)
+end
+
+-- Toggle the agy terminal. When opening from a code buffer, the active file
+-- (and visual selection, if any) is attached to the prompt automatically.
+---@param opts? { selection?: boolean }
+function M.toggle(opts)
+  if win_open() then
+    M.hide()
+  else
+    open_with_context(capture_context(opts and opts.selection))
+  end
+end
+
 -- Reference the current file in the agy prompt as an @mention.
 function M.send_file()
-  local path = vim.fn.expand("%:p")
-  if path == "" then
+  local ctx = capture_context(false)
+  if not ctx then
     vim.notify("agy: no file in current buffer", vim.log.levels.WARN)
     return
   end
-  local rel = vim.fn.fnamemodify(path, ":.")
-  M.open()
-  vim.defer_fn(function()
-    M.send(string.format(M.config.file_mention, rel))
-  end, 100)
+  open_with_context(ctx)
 end
 
--- Send the current visual selection to agy as context.
+-- Attach the current visual selection (file + line range) to the prompt.
 function M.send_selection()
-  local mode = vim.fn.mode()
-  -- grab the last visual selection
-  local srow = vim.fn.line("'<")
-  local erow = vim.fn.line("'>")
-  if mode:match("[vV]") then
-    srow, erow = vim.fn.line("v"), vim.fn.line(".")
+  local ctx = capture_context(true)
+  if not ctx then
+    vim.notify("agy: no file in current buffer", vim.log.levels.WARN)
+    return
   end
-  if srow > erow then
-    srow, erow = erow, srow
-  end
-  local lines = vim.api.nvim_buf_get_lines(0, srow - 1, erow, false)
-  local rel = vim.fn.fnamemodify(vim.fn.expand("%:p"), ":.")
-  local block = string.format("From %s:%d-%d:\n%s\n", rel, srow, erow, table.concat(lines, "\n"))
-  M.open()
-  vim.defer_fn(function()
-    M.send(block)
-  end, 100)
+  open_with_context(ctx)
 end
 
 function M.setup(opts)
