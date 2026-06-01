@@ -24,8 +24,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - MCP bridge (optional): a zero-dependency Node MCP server
   (`mcp/nvim-mcp-server.mjs`) that connects back to the host Neovim over `$NVIM`
   and exposes the tools `neovim_active_file`, `neovim_selection`,
-  `neovim_open_files`, and `neovim_diagnostics`. `:AgyMcpInstall` registers it in
-  `~/.gemini/config/mcp_config.json`.
+  `neovim_open_files`, `neovim_diagnostics`, and `neovim_apply_edit` (replace a
+  line range in an open buffer; undoable, not auto-saved). `:AgyMcpInstall`
+  registers it in `~/.gemini/config/mcp_config.json`.
 
 ### Changed
 

@@ -24,8 +24,9 @@ files on disk.
 - **Auto-reload** — open buffers refresh when `agy` modifies files on disk.
 - **Resume** — open continuing the most recent conversation (`agy --continue`).
 - **MCP bridge (optional)** — lets agy *query* your editor on demand (active file
-  with unsaved edits, visual selection, open files, LSP diagnostics) over MCP, the
-  robust equivalent of an IDE integration. See [MCP bridge](#mcp-bridge).
+  with unsaved edits, visual selection, open files, LSP diagnostics) and apply edits
+  to open buffers over MCP, the robust equivalent of an IDE integration. See
+  [MCP bridge](#mcp-bridge).
 
 ## Requirements
 
@@ -113,8 +114,8 @@ require("agy").setup({
 
 The terminal `@mention` injection above *pushes* context into the prompt. The MCP
 bridge is the complementary half: it lets agy **pull** your live editor state on
-demand — the robust equivalent of the Claude Code editor integration, over the
-channel agy actually supports (MCP).
+demand — and apply edits back to open buffers — the robust equivalent of the
+Claude Code editor integration, over the channel agy actually supports (MCP).
 
 It exposes these tools to agy:
 
@@ -124,6 +125,7 @@ It exposes these tools to agy:
 | `neovim_selection`    | Your most recent visual selection (file, line range, text)     |
 | `neovim_open_files`   | The list of files open in Neovim                               |
 | `neovim_diagnostics`  | LSP diagnostics for the active file (errors/warnings/hints)    |
+| `neovim_apply_edit`   | Replace a 1-based line range in an open buffer (undoable, unsaved) |
 
 ### How it works
 

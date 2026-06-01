@@ -36,12 +36,21 @@ function socketAddr() {
 }
 
 // Call a lua function in agy.mcp on the connected Neovim and return parsed JSON.
-function nvimCall(fn) {
+// When `arg` is given it is shipped as base64-encoded JSON (read in Lua as the
+// function's single argument), which sidesteps remote-expr quoting issues.
+function nvimCall(fn, arg) {
   const sock = socketAddr();
   if (!sock) {
     return { ok: false, reason: "no Neovim socket ($NVIM unset); is agy running inside Neovim?" };
   }
-  const expr = `luaeval("require([[agy.mcp]]).${fn}()")`;
+  let inner;
+  if (arg === undefined) {
+    inner = `require([[agy.mcp]]).${fn}()`;
+  } else {
+    const b64 = Buffer.from(JSON.stringify(arg)).toString("base64");
+    inner = `require([[agy.mcp]]).${fn}([[${b64}]])`;
+  }
+  const expr = `luaeval("${inner}")`;
   const res = spawnSync("nvim", ["--server", sock, "--remote-expr", expr], {
     encoding: "utf8",
     timeout: 5000,
@@ -89,6 +98,30 @@ const TOOLS = [
       "per severity. Use this to find and fix problems the editor is reporting.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: () => nvimCall("diagnostics"),
+  },
+  {
+    name: "neovim_apply_edit",
+    description:
+      "Replace a 1-based inclusive line range in an open Neovim buffer with new " +
+      "text. Edits the live buffer (undoable with `u`, not auto-saved). To insert " +
+      "without replacing, set end_line = start_line - 1. Defaults to the active " +
+      "file when path is omitted. Prefer this over writing files directly when the " +
+      "user has the file open.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "file to edit; defaults to the active file" },
+        start_line: { type: "integer", description: "1-based first line to replace (inclusive)" },
+        end_line: {
+          type: "integer",
+          description: "1-based last line to replace (inclusive); use start_line - 1 to insert",
+        },
+        text: { type: "string", description: "replacement text; may span multiple lines" },
+      },
+      required: ["start_line", "end_line", "text"],
+      additionalProperties: false,
+    },
+    run: (args) => nvimCall("apply_edit", args),
   },
 ];
 

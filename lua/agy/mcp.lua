@@ -167,4 +167,64 @@ function M.diagnostics()
   })
 end
 
+-- Replace a 1-based inclusive line range in a live buffer with new text.
+-- Arguments arrive base64-encoded JSON (avoids remote-expr quoting issues):
+--   { path?, start_line, end_line, text }
+-- end_line == start_line - 1 inserts before start_line without replacing.
+-- The edit lands in the buffer (undoable with `u`); it is not saved to disk.
+function M.apply_edit(arg_b64)
+  local ok, args = pcall(function()
+    return vim.json.decode(vim.base64.decode(arg_b64))
+  end)
+  if not ok or type(args) ~= "table" then
+    return vim.json.encode({ ok = false, reason = "could not decode arguments" })
+  end
+
+  local abs = args.path
+  if abs and abs ~= "" then
+    abs = vim.fn.fnamemodify(abs, ":p")
+  else
+    abs = vim.g.agy_active_file
+  end
+  if not abs or abs == "" then
+    return vim.json.encode({ ok = false, reason = "no target file (pass 'path' or open a file)" })
+  end
+
+  local b = bufnr_for(abs)
+  if b == -1 then
+    return vim.json.encode({ ok = false, reason = "file is not open in a loaded buffer: " .. abs })
+  end
+  if not vim.bo[b].modifiable then
+    return vim.json.encode({ ok = false, reason = "buffer is not modifiable" })
+  end
+
+  local s = tonumber(args.start_line)
+  local e = tonumber(args.end_line)
+  if not s or not e then
+    return vim.json.encode({ ok = false, reason = "start_line and end_line are required" })
+  end
+  local total = vim.api.nvim_buf_line_count(b)
+  s = math.max(1, math.min(s, total + 1))
+  if e > total then
+    e = total
+  end
+  -- 0-based, end-exclusive range for nvim_buf_set_lines
+  local start0 = s - 1
+  local end0 = (e >= s) and e or start0 -- e < s => insertion (empty range)
+
+  local repl = vim.split(args.text or "", "\n", { plain = true })
+  local applied, err = pcall(vim.api.nvim_buf_set_lines, b, start0, end0, false, repl)
+  if not applied then
+    return vim.json.encode({ ok = false, reason = tostring(err) })
+  end
+  return vim.json.encode({
+    ok = true,
+    path = relpath(abs),
+    abspath = abs,
+    replaced_lines = end0 - start0,
+    inserted_lines = #repl,
+    new_line_count = vim.api.nvim_buf_line_count(b),
+  })
+end
+
 return M
