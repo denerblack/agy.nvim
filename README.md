@@ -54,6 +54,7 @@ files on disk.
     { "<leader>aa", function() require("agy").toggle() end, desc = "Toggle agy" },
     { "<leader>ac", "<cmd>AgyContinue<cr>", desc = "agy: continue last conversation" },
     { "<leader>af", "<cmd>AgySendFile<cr>", desc = "agy: send current file" },
+    { "<leader>am", "<cmd>AgyMcpInstall<cr>", desc = "agy: install MCP bridge" },
     -- visual: use the range-aware command (range-safe; avoids E481 "No range allowed")
     { "<leader>as", "<cmd>AgySendSelection<cr>", mode = "v", desc = "agy: send selection" },
   },
