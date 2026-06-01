@@ -162,6 +162,10 @@ call the `neovim_*` tools when you ask about "this file" / "the selection".
 > The bridge is optional — without it, the terminal `@mention` auto-context still
 > works. With it, agy also sees unsaved edits and can fetch context itself.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT
