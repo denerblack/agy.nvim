@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-01
+
 ### Added
 
 - Embedded `agy` (Antigravity CLI) running in a full-height editor split (right
@@ -45,3 +47,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   booting and before the `@file` picker was confirmed.
 - `E481: No range allowed` when running `:Agy` (and other commands) from a visual
   selection, where `:` auto-inserts the `'<,'>` range.
+
+[Unreleased]: https://github.com/denerblack/agy.nvim/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/denerblack/agy.nvim/releases/tag/v0.1.0
